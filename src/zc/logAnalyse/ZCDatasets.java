@@ -23,6 +23,7 @@ public class ZCDatasets {
 
 	HashMap<String, String> metrics = null;
 	HashMap<String, TreeMap<Integer,Float>> CDFs = null;
+	HashMap<String, TreeMap<Long, MemUAPair>> uaSeriesMap = null;
 	HashMap<String, TreeSet<AppAttemptData>> appDatasets = null;
 	String rowNameOfCDF = null;
 	String colNameOfCDF = null;
@@ -285,6 +286,7 @@ public class ZCDatasets {
 		}
 		metrics = new HashMap<>();
 		CDFs = new HashMap<>();
+		uaSeriesMap = new HashMap<>();
 		appDatasets = new HashMap<>();
 		File resultDir = new File(analyseResultDir);
 		if (resultDir.isDirectory()) {
@@ -330,6 +332,20 @@ public class ZCDatasets {
 								//System.out.println(fullKey + "=" + kv[1]); // for test
 							}
 							CDFs.put(rootKey, cdf);
+						} else if (line.equals("[UASeries]")) {
+							line = br.readLine();
+							TreeMap<Long, MemUAPair> uaSeries = new TreeMap<>();
+							while ((line = br.readLine()) != null) {
+								if (line.trim().equals(""))
+									break;
+								String[] tua = line.trim().split(" ");
+								long time = Long.parseLong(tua[0]);
+								long memUsed = Long.parseLong(tua[1]);
+								long memAlloc = Long.parseLong(tua[2]);
+								uaSeries.put(time, new MemUAPair(time, memUsed, memAlloc));
+								//System.out.println(fullKey + "=" + kv[1]); // for test
+							}
+							uaSeriesMap.put(rootKey, uaSeries);
 						}
 					}
 					/////////////// [get appattempt stage time info] ///////////////
@@ -995,6 +1011,37 @@ public class ZCDatasets {
 	public XYDataset getCDFDataset(WorkLoadType wt, int minDiffMB, int maxDiffMB) {
 		return getCDFDataset(wt, DefaultParas.reduceNumGroup, SystemType.PREDRA, DefaultParas.mapReq, DefaultParas.reduceReq, DefaultParas.delta,
 				DefaultParas.beta, DefaultParas.gamma, DefaultParas.sigma, minDiffMB, maxDiffMB);
+	}
+	
+	public XYDataset getMemUADataset(WorkLoadType wt, int reduceNumGroup, SystemType st, int mapReqMB,
+			int reduceReqMB, float delta, float beta, float gamma, float sigma) {
+		if(st != SystemType.HADOOP) return null;
+		XYSeriesCollection xyseriescollection = new XYSeriesCollection();
+		String key = wt.toString() + " " + reduceNumGroup + " " + st.toString() + " " + mapReqMB + " " + reduceReqMB 
+				+ " " + delta + " " + beta + " " + gamma + " " + sigma;
+		TreeMap<Long, MemUAPair> memUASeries = uaSeriesMap.get(key);
+		if(memUASeries != null) {
+			XYSeries tuSeries = new XYSeries("MemUsed");
+			XYSeries taSeries = new XYSeries("MemAlloc");
+			for(Map.Entry<Long, MemUAPair> kv : memUASeries.entrySet()) {
+				long time = kv.getKey();
+				long memUsed = kv.getValue().getMemUsed();
+				long memAlloc = kv.getValue().getMemAlloc();
+				if(time > 0 && time < Long.MAX_VALUE) {
+					tuSeries.add(time, memUsed);
+					taSeries.add(time, memAlloc);
+				}
+			}
+			xyseriescollection.addSeries(tuSeries);
+			xyseriescollection.addSeries(taSeries);
+			return xyseriescollection;
+		}
+		return null;
+	}
+	
+	public XYDataset getMemUADataset(WorkLoadType wt, int mapReq, int redReq) {
+		return getMemUADataset(wt, DefaultParas.reduceNumGroup, SystemType.HADOOP, mapReq, redReq, DefaultParas.delta,
+				DefaultParas.beta, DefaultParas.gamma, DefaultParas.sigma);
 	}
 
 	// for test

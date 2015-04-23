@@ -12,9 +12,9 @@ import zc.logAnalyse.LogAnalyser.LogType;
 
 public class ZCMetrics {
 	
-	private Map<String, AppAttempt> aaidToAppAttempt;
-	private Map<String, TaskAttempt> taidToTaskAttempt;
-	private Map<String, TaskContainer> cidToTaskContainer;
+	private Map<String, AppAttempt> aaidToAppAttempt = null;
+	private Map<String, TaskAttempt> taidToTaskAttempt = null;
+	private Map<String, TaskContainer> cidToTaskContainer = null;
 	private Configuration conf = null;
 	
 	// Estimation and Usage differences
@@ -51,6 +51,8 @@ public class ZCMetrics {
 	private double maxMemUseRateInCluster;
 	private double memUseRateToAlloc;
 	private long totalMemInSys = 4l * 1024 * 1024 * 1024 * 5; // 4G / node, 5 compute node.
+	// used for store memory usage and allocation time series
+	private Map<Long, Pair<Long, Long>> memUASeries = null;
 	
 	////// curve precision //////
 	private double avgDiff;
@@ -68,6 +70,7 @@ public class ZCMetrics {
 		this.aaidToAppAttempt = aaidToAppAttempt;
 		this.taidToTaskAttempt = taidToTaskAttempt;
 		this.cidToTaskContainer = cidToTaskContainer;
+		memUASeries = new TreeMap<>();
 		eudiffCounts = new TreeMap<>();
 		CDF = new TreeMap<>();
 	}
@@ -267,6 +270,19 @@ public class ZCMetrics {
 		this.failRegRate = failRegRate;
 	}
 	
+	/**
+	 * @param time abs time
+	 * @param memUsed Unit MB
+	 * @param memAlloc Unit MB
+	 */
+	public void addMemUAPair(long time, long memUsed, long memAlloc) {
+		memUASeries.put(time, new Pair<Long, Long>(memUsed, memAlloc));
+	}
+	
+	public Map<Long, Pair<Long, Long>> getMemUASeries() {
+		return memUASeries;
+	}
+	
 	public void addEUDiff(long diff) {
 		int diffMB = (int)toMB(diff);
 		sumDiffCount ++;
@@ -385,6 +401,21 @@ public class ZCMetrics {
         + "PPREM=" + getPreemptionRate() + "\n"
         + "PFR=" + getFailRegRate();
 		System.out.println(outInfo);
+		
+		if(logType == LogType.HADOOP) {
+			System.out.println("\n[UASeries]");			
+			System.out.println("time(abs)	memUsed	memAlloc");
+			for(Map.Entry<Long, Pair<Long, Long>> entry : memUASeries.entrySet()) {
+				long time = entry.getKey();
+				if(time > 0) {
+					long memUsed = entry.getValue().getKey(); // unit MB
+					long memAlloc = entry.getValue().getValue(); // unit MB
+					if(memAlloc > 0) {
+						System.out.println(time + " " + memUsed + "	" + memAlloc);
+					}
+				}
+			}
+		}
 	
 		if(logType == LogType.PREDRA) {
 			convertToCDF();

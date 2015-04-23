@@ -232,6 +232,16 @@ public class ZCCharts {
 		}
 	}
 	
+	public static void displayLineChart(OutputStream out, XYDataset dataset, String title, String xAxisLabel, String yAxisLabel, boolean legend, int width, int height) {
+		try {
+			JFreeChart chart = createXYLineChart(title, xAxisLabel,
+					yAxisLabel, dataset, legend);
+			ChartUtilities.writeChartAsPNG(out, chart, width, height);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+	
 	public static void displayEvaOfPredra(ZCDatasets dataset, String outputDir, WorkLoadType wt) {
 		FileOutputStream fout = null;
 		String targetDir = null;
@@ -444,9 +454,36 @@ public class ZCCharts {
 		}
 	}
 	
+	public static void displayMemUASeries(ZCDatasets dataset, String outputDir, WorkLoadType wt, int mapReq, int redReq) {
+		FileOutputStream fout = null;
+		String targetDir = null;
+		File tdir = null;
+		try {
+			targetDir = outputDir + "/" + wt +"/hadoop";
+			tdir = new File(targetDir);
+			if(!tdir.exists()) tdir.mkdirs();
+			fout = new FileOutputStream(targetDir +"/MemUASeries");
+			displayLineChart(fout, dataset.getMemUADataset(wt, mapReq, redReq),
+					null, "Time", "Memory Used and Alloc (MB)", false, 200, 400);
+			fout.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+			if(fout != null) {
+				try {
+					fout.close();
+				} catch (IOException e1) {}
+			}
+		}
+	}
+	
 	public static void displayCDF(ZCDatasets dataset, String outputDir, int minDiffMB, int maxDiffMB) {
 		displayCDF(dataset, outputDir, WorkLoadType.SNS, minDiffMB, maxDiffMB);
 		displayCDF(dataset, outputDir, WorkLoadType.SE, minDiffMB, maxDiffMB);
+	}
+	
+	public static void displayMemUASeries(ZCDatasets dataset, String outputDir, int mapReq, int redReq) {
+		displayMemUASeries(dataset, outputDir, WorkLoadType.SNS, mapReq, redReq);
+		displayMemUASeries(dataset, outputDir, WorkLoadType.SE, mapReq, redReq);
 	}
 	
 	public static void displayAppStageTime(ZCDatasets dataset, String outputDir, String targetFullKey) {
@@ -503,20 +540,27 @@ public class ZCCharts {
 		
 		if(args.length < 3) {
 			System.out.println("Usage: ZCCharts analyseResultDir $CONFDIR/parameters-display.conf chartsOutputDir [minDiffOfCDF|target_full_configure_to_display] [maxDiffOfCDF]");
+			System.out.println("Usage: ZCCharts analyseResultDir $CONFDIR/parameters-display.conf chartsOutputDir [-outMemUA] [mapReq] [reduceReq]");
 			return;
 		}
 		int minDiffOfCDF = -500;
 		int maxDiffOfCDF = 500;
+		int mapReq = 2048;
+		int redReq = 4096;
 		String workloadFileToDisplay = null;
 		if(args.length == 4) {
 			workloadFileToDisplay = args[3];
 		} else if(args.length == 5) {
 			minDiffOfCDF = Integer.parseInt(args[3]);
 			maxDiffOfCDF = Integer.parseInt(args[4]);
+		} else if(args.length == 6 && args[3].equals("-outMemUA")) {
+			mapReq = Integer.parseInt(args[4]);
+			redReq = Integer.parseInt(args[5]);
 		}
 		ZCDatasets dataset = new ZCDatasets(args[0], args[1]);
 		displayMetrics(dataset, args[2]);
 		displayAppStageTime(dataset, args[2], workloadFileToDisplay); 
+		displayMemUASeries(dataset, args[2], mapReq, redReq);
 		displayCDF(dataset, args[2], minDiffOfCDF, maxDiffOfCDF);
 	}
 }

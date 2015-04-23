@@ -18,6 +18,7 @@ import java.util.regex.Matcher;
 import org.apache.hadoop.conf.Configuration;
 
 import static zc.logAnalyse.ZCPatterns.*;
+import static zc.logAnalyse.UnitConverter.*;
 
 /**
  * 日志分析类
@@ -318,39 +319,10 @@ public class LogAnalyser {
 		}
 	  
 	  // calculate avg memUseRate for all containers in system
-	  int countOfValidRates = 0;
-	  double maxMemUseRateForAllCoutainers = 0;
-	  double sumMemUsed = 0;
-	  double sumMemAlloc = 0;
-	  double memUseRate = 0;
-	  for(TaskContainer tc : cidToTaskContainer.values()) {
-	  	maxMemUseRateForAllCoutainers = 
-	  			tc.getMaxMemUseRate() > maxMemUseRateForAllCoutainers ? tc.getMaxMemUseRate() : maxMemUseRateForAllCoutainers;
-	  	if(tc.getSumMemUsed() > 0 && tc.getSumMemAlloc() > 0) {
-	  		sumMemUsed += tc.getSumMemUsed();
-	  		sumMemAlloc += tc.getSumMemAlloc();
-	  		countOfValidRates ++;
-	  	}
-	  }
-	  if (countOfValidRates > 0 ) memUseRate = sumMemUsed / sumMemAlloc;
-	  metrics.setMemUseRateToAlloc(memUseRate);
+		calculateAvgMemUseRate();
 	  //System.out.println("***[avg mem use rate to allocation]: " + metrics.getMemUseRateToAlloc());
-	  
-		if(logType == LogType.PREDRA) {
-			for(TaskContainer tc : cidToTaskContainer.values()) {
-				tc.analyseSimi();
-				Map<Long, Long> memUsages = tc.getMemUsages();
-				List<Map<Long, Long>> estimatedCurves = tc.getEstimatedCurves();
-				if(estimatedCurves.size() > 0) {
-					Map<Long, Long> lastCurve = estimatedCurves.get(estimatedCurves.size()-1);
-					for(Long relativeTime : memUsages.keySet()) {
-						long memUsage = memUsages.get(relativeTime);
-						long memEst = lastCurve.get(tc.getAbsTime(relativeTime));
-						metrics.addEUDiff(memEst-memUsage);
-					}
-				}
-			}
-		}
+		calculateMemUserateSeries();
+		calculateEstErrorCDF();
 	
 	}
 	
@@ -424,41 +396,24 @@ public class LogAnalyser {
 	
 	//calculate alloc mem use rate: the sum of memory used of all the running tasks at a certain time point divide the alloc mem.
 	private void calculateMemUserateSeries() {
-		// max , avg
-		
-  	double maxMemUseRate = 0;
-  	long sumOfUsedMem = 0;
-  	long sumOfAllocMem = 0;
-  	long sumOfAllocatedMem = 0;
-  	int countOfSamples = 0;
-	  for(long i=metrics.getFirstTaskStartTime(); i<=metrics.getLastTaskFinishTime(); i+=metrics.getMemUsageStep()) {
-	  	long sumMemUsageAtTheTime = 0;
-	  	long sumMemAllocAtTheTime = 0;
-	  	double maxMemUsageRateAtTheTime = 0;
-	  	for(TaskAttempt ta : taidToTaskAttempt.values()) {
-	  		if(ta.timeValid() && ta.getStartTime() <= i && ta.getFinishTime() >= i) {
-	  			long memUsageOfTheTask = ta.getTaskContainer().getMemUsage(i);
-	  			long memAllocOfTheTask = ta.getTaskContainer().getMemAlloc(i);
-	  			sumMemUsageAtTheTime += memUsageOfTheTask;
-	  			sumMemAllocAtTheTime += memAllocOfTheTask;
-	  			double currUseRate = (double)memUsageOfTheTask / memAllocOfTheTask;
-	  			maxMemUsageRateAtTheTime = currUseRate > maxMemUsageRateAtTheTime ? currUseRate : maxMemUsageRateAtTheTime;
-	  		}
-	  	}
-			countOfSamples ++;
-			maxMemUseRate = maxMemUsageRateAtTheTime > maxMemUseRate ? maxMemUsageRateAtTheTime : maxMemUseRate;
-	  	sumOfUsedMem += sumMemUsageAtTheTime;
-	  	sumOfAllocMem += sumMemAllocAtTheTime;
-	  }
-	  
-	  System.out.println("avg: " + (double)sumMem / countOfSamples + ", max: " + maxMem);
-	  if(countOfSamples > 0) {
-	  	metrics.setAvgMemUseRateInCluster((double)sumOfUsedMem / sumOfAllocMem);
-	  	metrics.setMaxMemUseRateInCluster(maxMemUseRate); 
-  	
-	  	System.out.println("avg mem use rate in cluster is: "+metrics.getAvgMemUseRateInCluster()
-	  			+ ", max mem use rate in cluster is: " + metrics.getMaxMemUseRateInCluster());
-	  }
+		if(logType == LogType.HADOOP) {
+		  for(long i=metrics.getFirstTaskStartTime(); i<=metrics.getLastTaskFinishTime(); i+=metrics.getMemUsageStep()) {
+		  	long sumMemUsageAtTheTime = 0;
+		  	long sumMemAllocAtTheTime = 0;
+		  	double maxMemUsageRateAtTheTime = 0;
+		  	for(TaskAttempt ta : taidToTaskAttempt.values()) {
+		  		if(ta.timeValid() && ta.getStartTime() <= i && ta.getFinishTime() >= i) {
+		  			long memUsageOfTheTask = ta.getTaskContainer().getMemUsage(i);
+		  			long memAllocOfTheTask = ta.getTaskContainer().getMemAlloc(i);
+		  			sumMemUsageAtTheTime += memUsageOfTheTask;
+		  			sumMemAllocAtTheTime += memAllocOfTheTask;
+		  			double currUseRate = (double)memUsageOfTheTask / memAllocOfTheTask;
+		  			maxMemUsageRateAtTheTime = currUseRate > maxMemUsageRateAtTheTime ? currUseRate : maxMemUsageRateAtTheTime;
+		  		}
+		  	}
+		  	metrics.addMemUAPair(i, (long)BtoMB(sumMemUsageAtTheTime), (long)BtoMB(sumMemAllocAtTheTime));
+		  }
+		}
 	}
 	
 	@Deprecated

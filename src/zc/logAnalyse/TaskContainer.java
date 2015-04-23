@@ -19,6 +19,7 @@ public class TaskContainer {
 	private long sumMemAlloc = 0;
 	private double curMaxMemUseRateToAlloc = 0;
 	private TreeMap<Long, Long> memUsages = null;
+	private TreeMap<Long, Long> memAllocs = null;
 	private List<JvmMemUsage> jvmUsageRecords = null; // list of triple
 																										// <timestamp, mem used, mem
 																										// total>.
@@ -204,6 +205,14 @@ public class TaskContainer {
 		return estimatedCurves;
 	}
 	
+	public long getNearestTimeFromUsageSeries(long time) {
+		time -= earliestTime;
+		Map.Entry<Long, Long> entry = memUsages.ceilingEntry(time);
+		if(entry == null) entry = memUsages.floorEntry(time);
+		if(entry != null) return entry.getKey() + earliestTime;
+		return -1;
+	}
+	
 	/**
 	 * get memUsage NEAR the time
 	 * @param time abstime
@@ -213,6 +222,19 @@ public class TaskContainer {
 		time -= earliestTime;
 		Map.Entry<Long, Long> entry = memUsages.ceilingEntry(time);
 		if(entry == null) entry = memUsages.floorEntry(time);
+		if(entry != null) return entry.getValue();
+		return -1;
+	}
+	
+	/**
+	 * get memUsage NEAR the time
+	 * @param time abstime
+	 * @return memused or -1 where there is no memusage recorded near given time
+	 */
+	public long getMemAlloc(long time) {
+		time -= earliestTime;
+		Map.Entry<Long, Long> entry = memAllocs.ceilingEntry(time);
+		if(entry == null) entry = memAllocs.floorEntry(time);
 		if(entry != null) return entry.getValue();
 		return -1;
 	}
@@ -275,8 +297,9 @@ public class TaskContainer {
 	 *  ZCTODO take care of the unit convert problem while running on non-modified Hadoop.
 	 * @return
 	 */
-	public Map<Long, Long> getPoints() {
-		TreeMap<Long, Long> points = new TreeMap<>();		
+	public void getPoints() {
+		memUsages = new TreeMap<>();
+		memAllocs = new TreeMap<>();
 		long formerRelativeTime = 0l;
 		sort();
 		for(MemUsage usage : memUsageRecords) {
@@ -285,12 +308,11 @@ public class TaskContainer {
 			// take care of the "unknown" record
 			long relativeTime = getRelativeTime(usage.getTimestampMilli());
 			if(relativeTime >= formerRelativeTime && !usage.getMemUsed().equals("unknown")) {
-				points.put(relativeTime, Long.parseLong(usage.getMemUsed()));
+				memUsages.put(relativeTime, Long.parseLong(usage.getMemUsed()));
+				memAllocs.put(relativeTime, Long.parseLong(usage.getMemTotal()));
 				formerRelativeTime = relativeTime;
 			}
 		}
-		memUsages = points;
-		return points;
 	}
 	
 	private long getRelativeTime(long absTime) {
@@ -373,7 +395,7 @@ public class TaskContainer {
 	public void sort() {
 		Collections.sort(this.memUsageRecords);
 		Collections.sort(this.jvmUsageRecords);
-		Collections.sort(this.gmarks);
+		//Collections.sort(this.gmarks);
 		//fillUnknownMem(); // canceled by ZC at 20141229
 	}
 
