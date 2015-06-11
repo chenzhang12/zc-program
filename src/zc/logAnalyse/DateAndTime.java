@@ -52,6 +52,10 @@ public class DateAndTime {
 		Date dt = new Date(time);
 		return sdf.format(dt);
 	}
+	
+	public static long roundDownMills(long time) {
+		return time / 1000 * 1000;
+	}
 
 	// for test
 	public static void main(String[] args) {

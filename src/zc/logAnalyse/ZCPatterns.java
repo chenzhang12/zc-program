@@ -12,6 +12,8 @@ public class ZCPatterns {
 	
 	
 	private static final String taAndCPatternStr = "(\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2}\\,\\d{3}) INFO \\[AsyncDispatcher event handler\\] org\\.apache\\.hadoop\\.mapreduce\\.v2\\.app\\.job\\.impl\\.TaskAttemptImpl: TaskAttempt: \\[(attempt_(\\d+_\\d+)_([m,r])_\\d+_\\d+)\\] using containerId: \\[(container_\\d+_\\d+_\\d+_\\d+) on NM: \\[([a-z,A-Z,0-9,-]+):\\d+\\]";
+	// 2015-05-27 20:16:57,816 INFO org.apache.hadoop.yarn.server.nodemanager.containermanager.ContainerManagerImpl: Start request for container_1432757784415_0002_01_000127 by user zc
+	private static final String cReqStartStr = "(\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2}\\,\\d{3}) INFO org\\.apache\\.hadoop\\.yarn\\.server\\.nodemanager\\.containermanager\\.ContainerManagerImpl: Start request for (container_\\d+_\\d+_\\d+_\\d+) by user";
 	private static final String cLaunchPatternStr = "(\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2}\\,\\d{3}) INFO org\\.apache\\.hadoop\\.yarn\\.server\\.nodemanager\\.DefaultContainerExecutor: launchContainer: \\[nice, -n, \\d, bash, /home/\\w+/data/yarn/local/usercache/\\w+/appcache/application_\\d+_\\d{4}/(container_\\d+_\\d+_\\d+_\\d+)/default_container_executor\\.sh\\]";
 	private static final String memUsePatternStr = "(\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2}\\,\\d{3}) INFO org\\.apache\\.hadoop\\.yarn\\.server\\.nodemanager\\.containermanager\\.monitor\\.ContainersMonitorImpl: Memory usage of ProcessTree (\\d+) for container-id (container_\\d+_\\d+_\\d+_\\d+): ([\\d,\\.]+ [G,M]B) of ([\\d,\\.]+ [G,M]B) physical";
 	private static final String memUsePatternStr2 = "(\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2}\\,\\d{3}) INFO org\\.apache\\.hadoop\\.yarn\\.server\\.nodemanager\\.containermanager\\.monitor\\.ContainersMonitorImpl: Memory usage of ProcessTree (\\d+) for container-id (container_\\d+_\\d+_\\d+_\\d+): (\\d+)B of (\\d+)B physical";
@@ -66,7 +68,13 @@ public class ZCPatterns {
 	private static final String zcAResultAppAttemptStr = "\\[(appattempt_.+)\\]\\[submit time: (.+)\\]\\[start time: (.+)\\]\\[finish time: (.+)\\]";
 	////////////////////////// states of tasks begin ///////////////////////////
 	
-	// 2014-11-09 12:20:38,985 INFO [AsyncDispatcher event handler] org.apache.hadoop.mapreduce.v2.app.job.impl.TaskAttemptImpl: attempt_1415504548970_0007_m_000007_0 TaskAttempt Transitioned from ASSIGNED to RUNNING
+	// 2015-05-27 20:39:30,701 INFO [AsyncDispatcher event handler] org.apache.hadoop.mapreduce.v2.app.job.impl.TaskAttemptImpl: attempt_1432757784415_0021_m_000000_0 TaskAttempt Transitioned from NEW to UNASSIGNED
+	private static final String taskAttemptReqForAssignStr = infoLogPrefix + " \\[AsyncDispatcher event handler\\] org\\.apache\\.hadoop\\.mapreduce\\.v2\\.app\\.job\\.impl\\.TaskAttemptImpl: (attempt_(\\d+_\\d+)_([m,r])_\\d+_\\d+) TaskAttempt Transitioned from NEW to UNASSIGNED";
+	
+	// 2015-05-27 20:39:30,497 INFO [AsyncDispatcher event handler] org.apache.hadoop.mapreduce.v2.app.job.impl.TaskAttemptImpl: attempt_1432757784415_0012_m_000019_0 TaskAttempt Transitioned from UNASSIGNED to ASSIGNED
+	private static final String taskAttemptAssignedStr = infoLogPrefix + " \\[AsyncDispatcher event handler\\] org\\.apache\\.hadoop\\.mapreduce\\.v2\\.app\\.job\\.impl\\.TaskAttemptImpl: (attempt_(\\d+_\\d+)_([m,r])_\\d+_\\d+) TaskAttempt Transitioned from UNASSIGNED to ASSIGNED";
+	
+  // 2014-11-09 12:20:38,985 INFO [AsyncDispatcher event handler] org.apache.hadoop.mapreduce.v2.app.job.impl.TaskAttemptImpl: attempt_1415504548970_0007_m_000007_0 TaskAttempt Transitioned from ASSIGNED to RUNNING
 	private static final String taskAttemptStartRunningStr = infoLogPrefix + " \\[AsyncDispatcher event handler\\] org\\.apache\\.hadoop\\.mapreduce\\.v2\\.app\\.job\\.impl\\.TaskAttemptImpl: (attempt_(\\d+_\\d+)_([m,r])_\\d+_\\d+) TaskAttempt Transitioned from ASSIGNED to RUNNING";
 
 	// 2014-11-09 12:20:53,621 INFO [AsyncDispatcher event handler] org.apache.hadoop.mapreduce.v2.app.job.impl.TaskAttemptImpl: attempt_1415504548970_0007_m_000010_0 TaskAttempt Transitioned from SUCCESS_CONTAINER_CLEANUP to SUCCEEDED
@@ -148,6 +156,11 @@ public class ZCPatterns {
 	 */
   public static final Pattern taAndCPattern = Pattern.compile(taAndCPatternStr);
   
+  /**
+   * group(1): 2015-05-27 20:16:57,816
+   * group(2): container_1432757784415_0002_01_000127
+   */
+  public static final Pattern cReqStartPattern = Pattern.compile(cReqStartStr);
 	/**
 	 * cLaunchPattern: task container launching pattern (in NM's log) group1:
 	 * timestamp group2: taskContainerId
@@ -213,6 +226,22 @@ public class ZCPatterns {
 	 * group(4): m
 	 */
   public static final Pattern taskAttemptSuccessPattern = Pattern.compile(taskAttemptSuccessStr);
+
+  /**
+   * group(1): 2014-11-09 12:20:38,978
+   * group(2): attempt_1415504548970_0007_m_000001_0
+   * group(3): 1415504548970_0007
+   * group(4): m
+   */
+  public static final Pattern taskAttemptReqForAssignPattern = Pattern.compile(taskAttemptReqForAssignStr);
+ 
+  /**
+   * group(1): 2014-11-09 12:20:38,978
+   * group(2): attempt_1415504548970_0007_m_000001_0
+   * group(3): 1415504548970_0007
+   * group(4): m
+   */
+  public static final Pattern taskAttemptAssignedPattern = Pattern.compile(taskAttemptAssignedStr);
   /**
    * group(1): 2014-11-09 12:20:38,978
    * group(2): attempt_1415504548970_0007_m_000001_0

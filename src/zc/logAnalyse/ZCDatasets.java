@@ -24,6 +24,7 @@ public class ZCDatasets {
 	HashMap<String, String> metrics = null;
 	HashMap<String, TreeMap<Integer,Float>> CDFs = null;
 	HashMap<String, TreeMap<Long, MemUAPair>> uaSeriesMap = null;
+	HashMap<String, TreeMap<Long, UAScTuple>> uascsMap = null;
 	HashMap<String, TreeSet<AppAttemptData>> appDatasets = null;
 	String rowNameOfCDF = null;
 	String colNameOfCDF = null;
@@ -287,6 +288,7 @@ public class ZCDatasets {
 		metrics = new HashMap<>();
 		CDFs = new HashMap<>();
 		uaSeriesMap = new HashMap<>();
+		uascsMap = new HashMap<>();
 		appDatasets = new HashMap<>();
 		File resultDir = new File(analyseResultDir);
 		if (resultDir.isDirectory()) {
@@ -338,7 +340,7 @@ public class ZCDatasets {
 							while ((line = br.readLine()) != null) {
 								if (line.trim().equals(""))
 									break;
-								String[] tua = line.trim().split(" ");
+								String[] tua = line.trim().split(" "); // space
 								long time = Long.parseLong(tua[0]);
 								long memUsed = Long.parseLong(tua[1]);
 								long memAlloc = Long.parseLong(tua[2]);
@@ -346,6 +348,21 @@ public class ZCDatasets {
 								//System.out.println(fullKey + "=" + kv[1]); // for test
 							}
 							uaSeriesMap.put(rootKey, uaSeries);
+						} else if (line.equals("[collectedUAScs]")) {
+							line = br.readLine();
+							TreeMap<Long, UAScTuple> uascs = new TreeMap<>();
+							while ((line = br.readLine()) != null) {
+								if (line.trim().equals(""))
+									break;
+								String[] tuas = line.trim().split(" "); // space
+								long time = Long.parseLong(tuas[0]);
+								long memUsed = Long.parseLong(tuas[1]);
+								long memAlloc = Long.parseLong(tuas[2]);
+								int taskScheded = Integer.parseInt(tuas[3]);
+								uascs.put(time, new UAScTuple(time, memUsed, memAlloc, taskScheded));
+								//System.out.println(fullKey + "=" + kv[1]); // for test
+							}
+							uascsMap.put(rootKey, uascs);
 						}
 					}
 					/////////////// [get appattempt stage time info] ///////////////

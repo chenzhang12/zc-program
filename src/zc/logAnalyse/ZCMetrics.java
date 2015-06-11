@@ -3,6 +3,7 @@ package zc.logAnalyse;
 import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -46,13 +47,16 @@ public class ZCMetrics {
 	private double avgParallelism;
 	
 	////// memory usage //////
-	private long memUsageStep = 1000;
+	private long memUsageStep = 60000;
+	private long memUsageStep2 = 3000;
 	private double avgMemUseRateInCluster;
 	private double maxMemUseRateInCluster;
 	private double memUseRateToAlloc;
 	private long totalMemInSys = 4l * 1024 * 1024 * 1024 * 5; // 4G / node, 5 compute node.
 	// used for store memory usage and allocation time series
 	private Map<Long, Pair<Long, Long>> memUASeries = null;
+	private Map<String, Map<Long, Pair<Long, Long>>> node2MemUASeries = null;
+	private Map<Long, UAScTuple> collectedUAScs = null;
 	
 	////// curve precision //////
 	private double avgDiff;
@@ -71,6 +75,8 @@ public class ZCMetrics {
 		this.taidToTaskAttempt = taidToTaskAttempt;
 		this.cidToTaskContainer = cidToTaskContainer;
 		memUASeries = new TreeMap<>();
+		node2MemUASeries = new HashMap<>();
+		collectedUAScs = new TreeMap<>();
 		eudiffCounts = new TreeMap<>();
 		CDF = new TreeMap<>();
 	}
@@ -196,6 +202,10 @@ public class ZCMetrics {
 		return memUsageStep;
 	}
 
+	public long getMemUsageStep2() {
+		return memUsageStep2;
+	}
+
 	public void setMemUsageStep(long memUsageStep) {
 		this.memUsageStep = memUsageStep;
 	}
@@ -279,8 +289,31 @@ public class ZCMetrics {
 		memUASeries.put(time, new Pair<Long, Long>(memUsed, memAlloc));
 	}
 	
+	public void addUAScTuple(long sctime, long u, long a, int sc) {
+		UAScTuple tuple = collectedUAScs.get(sctime);
+		if(tuple == null) {
+			tuple = new UAScTuple(u,a,sc);
+			collectedUAScs.put(sctime, tuple);
+		} else {
+			tuple.add(u,a,sc);
+		}
+	}
+	
+	public void addNid2MemUAPair(String nodeId, long time, long memUsed, long memAlloc) {
+		Map<Long, Pair<Long, Long>> series = node2MemUASeries.get(nodeId);
+		if(series == null) {
+			series = new TreeMap<Long, Pair<Long, Long>>();
+			node2MemUASeries.put(nodeId, series);
+		}
+		series.put(time, new Pair<Long, Long>(memUsed, memAlloc));
+	}
+	
 	public Map<Long, Pair<Long, Long>> getMemUASeries() {
 		return memUASeries;
+	}
+	
+	public Map<String, Map<Long, Pair<Long, Long>>> getNid2MemUASeries() {
+		return node2MemUASeries;
 	}
 	
 	public void addEUDiff(long diff) {
@@ -402,27 +435,46 @@ public class ZCMetrics {
         + "PFR=" + getFailRegRate();
 		System.out.println(outInfo);
 		
-		if(logType == LogType.HADOOP) {
+		if (memUASeries != null && memUASeries.size() != 0) {
 			System.out.println("\n[UASeries]");			
-			System.out.println("time(abs)	memUsed	memAlloc");
+			System.out.println("time(abs) memUsed memAlloc"); // separated by spaces
 			for(Map.Entry<Long, Pair<Long, Long>> entry : memUASeries.entrySet()) {
 				long time = entry.getKey();
 				if(time > 0) {
 					long memUsed = entry.getValue().getKey(); // unit MB
 					long memAlloc = entry.getValue().getValue(); // unit MB
-					if(memAlloc > 0) {
-						System.out.println(time + " " + memUsed + "	" + memAlloc);
+					if(memAlloc >= 0) {
+						System.out.println(time + " " + memUsed + " " + memAlloc); // separated by spaces
+					}
+				}
+			}
+		}
+		
+		if (collectedUAScs != null & collectedUAScs.size() != 0) {
+			System.out.println("\n[collectedUAScs]");
+			System.out.println("time(abs) memUsed memAlloc sched"); // separated by spaces
+			for(Map.Entry<Long, UAScTuple> entry : collectedUAScs.entrySet()) {
+				long time = entry.getKey();
+				if(time > 0) {
+					UAScTuple tp = entry.getValue();
+					long memUsed = tp.u; // unit MB
+					long memAlloc = tp.a; // unit MB
+					int sc = tp.sc;
+					if(memAlloc >= 0) {
+						System.out.println(time + " " + memUsed + " " + memAlloc + " " + sc); // separated by spaces
 					}
 				}
 			}
 		}
 	
 		if(logType == LogType.PREDRA) {
-			convertToCDF();
-			System.out.println("\n[CDF]");			
-			System.out.println("DiffOfMEMU(MB) CDFOfDiff");
-			for(Map.Entry<Integer, Float> entry : CDF.entrySet()) {
-				System.out.println(entry.getKey() + " " + entry.getValue());
+			if(eudiffCounts != null && eudiffCounts.size() != 0) {
+				convertToCDF();
+				System.out.println("\n[CDF]");
+				System.out.println("DiffOfMEMU(MB) CDFOfDiff");
+				for(Map.Entry<Integer, Float> entry : CDF.entrySet()) {
+					System.out.println(entry.getKey() + " " + entry.getValue());
+				}
 			}
 		}
 	}

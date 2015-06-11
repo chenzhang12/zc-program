@@ -12,6 +12,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 
@@ -40,8 +41,12 @@ public class LogAnalyser {
 
 	private Map<String, AppAttempt> aaidToAppAttempt = null;
 	private Map<String, TaskAttempt> taidToTaskAttempt = null;
+	private Map<String, Set<TaskAttempt>> nodeId2TAs = null;
 	private Map<String, TaskContainer> cidToTaskContainer = null;
 	private Map<String, String>	TCID2TaskLogName = null;
+	private Map<String, Map<Long, Integer>> nodeId2SchedTaskCounter = null; // <datestr, countScheded>
+	private boolean isCalculateUASeries = false;
+	private boolean isCalculateUASeriesForNodes = false;
 	
 	private Set<String> AMLogNames = null;
 	private Set<String> NMLogNames = null;
@@ -60,10 +65,10 @@ public class LogAnalyser {
 	private LogType logType;
 
 	public LogAnalyser() {
-		this(null, null, null, null, false);
+		this(null, null, null, null, false, false, false);
 	}
 
-	public LogAnalyser(String logHome, String rmHostName, String userName, LogType lt, boolean outputUsageCurve) {
+	public LogAnalyser(String logHome, String rmHostName, String userName, LogType lt) {
 		if (logHome != null)
 			this.LOG_HOME = logHome;
 		if (rmHostName != null)
@@ -78,14 +83,15 @@ public class LogAnalyser {
 		
 		this.aaidToAppAttempt = new HashMap<String, AppAttempt>();
 		this.taidToTaskAttempt = new HashMap<String, TaskAttempt>();
+		nodeId2TAs = new HashMap<String, Set<TaskAttempt>>();
 		this.cidToTaskContainer = new HashMap<String, TaskContainer>();
 		this.TCID2TaskLogName = new HashMap<String, String>();
-		
+		nodeId2SchedTaskCounter = new HashMap<String, Map<Long, Integer>>();
 		this.AMLogNames = new HashSet<String>();
 		this.NMLogNames = new HashSet<String>();		
 		this.nodeIds = new TreeSet<String>();
 		this.logType = lt;
-		this.outputUsageCurve = outputUsageCurve;
+		
 		
 		String hadoopConfDir = logHome + "/etc/hadoop";
 		
@@ -100,6 +106,14 @@ public class LogAnalyser {
 		}
 		
 		metrics = new ZCMetrics(aaidToAppAttempt,taidToTaskAttempt,cidToTaskContainer,conf);
+	}
+
+	public LogAnalyser(String logHome, String rmHostName, String userName,
+			LogType lt, boolean outputUsageCurve, boolean isCalculateUASeries, boolean isCalculateUASeriesForNodes) {
+		this(logHome, rmHostName, userName, lt);
+		this.outputUsageCurve = outputUsageCurve;
+		this.isCalculateUASeries = isCalculateUASeries;
+		this.isCalculateUASeriesForNodes = isCalculateUASeriesForNodes;
 	}
 
 	public void analyse() {
@@ -233,9 +247,8 @@ public class LogAnalyser {
 					ta.setFinishTime(m3.group(1));
 				}
 			}
-		}
-		
-		
+		}	
+			
 		// for analyze throughput
 		// int taskCount = 0;
 		// for calculate parallelism
@@ -313,15 +326,40 @@ public class LogAnalyser {
 					tc.setProcessTreeId(processTreeId);
 				}
 			}
+			
+			if(logType == LogType.HADOOP && isCalculateUASeriesForNodes) {
+				// count assigned tasks for each node at each logged time point.
+				// build Map<nodeId, Map<time, assignedTasksCount>>
+				String nodeId = getNodeIdFromNMLogName(fileName);
+				if(nodeId == null) return;
+				Matcher m2 = cReqStartPattern.matcher(logBuffer);
+				while (m2.find()) {
+					String dateStr = m2.group(1);
+					long time3 = DateAndTime.roundDownMills(DateAndTime.dateToTime(dateStr));
+					Map<Long, Integer> time2SchedTaskCounterMap = nodeId2SchedTaskCounter.get(nodeId);
+					if(time2SchedTaskCounterMap == null) {
+						time2SchedTaskCounterMap = new TreeMap<Long, Integer>();
+						nodeId2SchedTaskCounter.put(nodeId, time2SchedTaskCounterMap);
+					}
+					Integer count = time2SchedTaskCounterMap.get(time3);
+					if (count == null) {
+						time2SchedTaskCounterMap.put(time3, 1);
+					} else {
+						count = count + 1;
+						time2SchedTaskCounterMap.put(time3, count);
+					}
+				}
+			}
 		}
+		
 		for(TaskContainer tc : cidToTaskContainer.values()) {
 			tc.getPoints();
 		}
 	  
-	  // calculate avg memUseRate for all containers in system
 		calculateAvgMemUseRate();
-	  //System.out.println("***[avg mem use rate to allocation]: " + metrics.getMemUseRateToAlloc());
 		calculateMemUserateSeries();
+		calculateMUASeriesForEachNode();
+		matchTaskCountAndMemUAforEachNode();
 		calculateEstErrorCDF();
 	
 	}
@@ -394,9 +432,9 @@ public class LogAnalyser {
 		}
 	}
 	
-	//calculate alloc mem use rate: the sum of memory used of all the running tasks at a certain time point divide the alloc mem.
+	//calculate alloc mem use rate: the sum of memory used of all the running tasks at a certain abs time point divide the alloc mem.
 	private void calculateMemUserateSeries() {
-		if(logType == LogType.HADOOP) {
+		if(logType == LogType.HADOOP && isCalculateUASeries) {
 		  for(long i=metrics.getFirstTaskStartTime(); i<=metrics.getLastTaskFinishTime(); i+=metrics.getMemUsageStep()) {
 		  	long sumMemUsageAtTheTime = 0;
 		  	long sumMemAllocAtTheTime = 0;
@@ -414,6 +452,62 @@ public class LogAnalyser {
 		  	metrics.addMemUAPair(i, (long)BtoMB(sumMemUsageAtTheTime), (long)BtoMB(sumMemAllocAtTheTime));
 		  }
 		}
+	}
+	
+	/**
+	 * Calculate memory use and allocation series for each node
+	 * and store the series in a Map<nodeId, Map<abstime, memoryUASeries>>
+	 */
+	private void calculateMUASeriesForEachNode() {
+		if(logType == LogType.HADOOP && isCalculateUASeriesForNodes) {
+			for(Map.Entry<String, Set<TaskAttempt>> nid2tas : nodeId2TAs.entrySet()) {
+				for(long i=metrics.getFirstTaskStartTime(); i<=metrics.getLastTaskFinishTime(); i+=metrics.getMemUsageStep2()) {
+			  	long sumMemUsageAtTheTime = 0;
+			  	long sumMemAllocAtTheTime = 0;
+			  	for(TaskAttempt ta : nid2tas.getValue()) {
+			  		if(ta.timeValid() && ta.getStartTime() <= i && ta.getFinishTime() >= i) {
+			  			long memUsageOfTheTask = ta.getTaskContainer().getMemUsage(i);
+			  			long memAllocOfTheTask = ta.getTaskContainer().getMemAlloc(i);
+			  			sumMemUsageAtTheTime += memUsageOfTheTask;
+			  			sumMemAllocAtTheTime += memAllocOfTheTask;
+			  		}
+			  	}
+			  	metrics.addNid2MemUAPair(nid2tas.getKey(), i, (long)BtoMB(sumMemUsageAtTheTime), (long)BtoMB(sumMemAllocAtTheTime));
+				}
+			}
+		}
+	}
+	
+  /**
+   *  got <sctime, used, alloc, schededTasks> list for each node and
+   *  add all of them in every node whose sctime equal together.
+   */
+	private void matchTaskCountAndMemUAforEachNode() {
+		if(logType != LogType.HADOOP || !isCalculateUASeriesForNodes) return;
+		// nodeId2SchedTaskCounter
+		// metrics.getNid2MemUASeries();
+		Map<String, Map<Long, Pair<Long, Long>>> nid2UAseries = metrics.getNid2MemUASeries();
+		for(Map.Entry<String, Map<Long, Integer>> nodeId2stcs : nodeId2SchedTaskCounter.entrySet()) {
+			String nodeId = nodeId2stcs.getKey();
+			Map<Long, Integer> time2SchedTaskCounter = nodeId2stcs.getValue();
+			TreeMap<Long, Pair<Long, Long>> time2UAs = (TreeMap)nid2UAseries.get(nodeId);
+			if(time2UAs != null) {
+				// match the counted assigned tasks at each time point to the UA series.
+				for(Map.Entry<Long,Integer> time2SchedCount : time2SchedTaskCounter.entrySet()) {
+					long ctime = time2SchedCount.getKey();
+					int schededTasks = time2SchedCount.getValue();
+					Map.Entry<Long, Pair<Long, Long>> t2UApair = time2UAs.ceilingEntry(ctime);
+					if(t2UApair == null) t2UApair = time2UAs.floorEntry(ctime);
+					if(t2UApair != null) {
+						long used = t2UApair.getValue().getKey();
+						long alloc = t2UApair.getValue().getValue();
+						// Output <ctime, used, alloc, schededTasks> to ZCMetrics
+						metrics.addUAScTuple(ctime, used, alloc, schededTasks);
+					}
+				}
+			}
+		}
+
 	}
 	
 	@Deprecated
@@ -535,6 +629,12 @@ public class LogAnalyser {
 				+ "-nodemanager-" + nodeId + ".log";
 	}
 	
+	private String getNodeIdFromNMLogName(String NMLogName) {
+		int start = NMLogName.lastIndexOf("-nodemanager-") + "-nodemanager-".length();
+		int end = NMLogName.indexOf(".log", start);
+		return NMLogName.substring(start, end);
+	}
+	
 	private String getZCLogDir(String nodeId) {
 		return LOG_HOME + "/" + nodeId + "/zcLogs";
 	}
@@ -563,6 +663,15 @@ public class LogAnalyser {
 		this.aaidToAppAttempt.get(taskAttempt.getAppattemptId())
 				.addTaskAttempt(taskAttempt);
 		this.taidToTaskAttempt.put(taskAttempt.getTaskAttemptId(), taskAttempt);
+		String nodeId = taskAttempt.getNodeId();
+		if(nodeId != null) {
+			Set<TaskAttempt> tata = this.nodeId2TAs.get(nodeId);
+			if(tata == null) {
+				tata = new HashSet<TaskAttempt>();
+				nodeId2TAs.put(nodeId, tata);
+			}
+			tata.add(taskAttempt);
+		}
 		this.cidToTaskContainer.put(taskAttempt.getTaskContainerId(),
 				taskAttempt.getTaskContainer());
 	}
@@ -612,19 +721,19 @@ public class LogAnalyser {
 	}
 
 	/**
-	 * TODO input workload characters.
+	 * input workload characters.
 	 * @param args
 	 * @throws IOException 
 	 */
 	public static void main(String[] args) throws IOException {
 		
 		LogAnalyser la = null;
-		if (args.length < 5) {
+		if (args.length < 7) {
 			//la = new LogAnalyser(
 			//		"/home/zc/Desktop/smallTools/logAnalysisTools/hadoopLogs_zc",
 			//		"centos-1", "zc", LogType.HADOOP, false);
-			System.err.println("Arguments should be larger than 5. "
-					+ "\n downloadedLogSourcePath rmlogDir username [hadoop|predra|mror|admp] [true(outputUsageCurve)|false]");
+			System.err.println("Arguments should be equals 7. "
+					+ "\n downloadedLogSourcePath rmlogDir username [hadoop|predra|mror|admp] [true(outputUsageCurve)|false] [(isCalculateUASeries)true|false] [(isCalculateUASForEachNode)true|false]");
 			return;
 		} else {
 			String type = args[3];
@@ -643,7 +752,7 @@ public class LogAnalyser {
 				typee = LogType.ADMP;
 				break;
 			}
-			la = new LogAnalyser(args[0],args[1],args[2],typee,Boolean.parseBoolean(args[4]));
+			la = new LogAnalyser(args[0],args[1],args[2],typee,Boolean.parseBoolean(args[4]),Boolean.parseBoolean(args[5]),Boolean.parseBoolean(args[6]));
 		}
 		la.analyse();
 		//BufferedWriter bw = new BufferedWriter(new FileWriter("/home/zc/Desktop/smallTools/logAnalysisTools/logLog.log"));

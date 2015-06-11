@@ -548,6 +548,7 @@ public class ZCCharts {
 		int mapReq = 2048;
 		int redReq = 4096;
 		String workloadFileToDisplay = null;
+		boolean outMemUA = false;
 		if(args.length == 4) {
 			workloadFileToDisplay = args[3];
 		} else if(args.length == 5) {
@@ -556,11 +557,12 @@ public class ZCCharts {
 		} else if(args.length == 6 && args[3].equals("-outMemUA")) {
 			mapReq = Integer.parseInt(args[4]);
 			redReq = Integer.parseInt(args[5]);
+			outMemUA = true;
 		}
 		ZCDatasets dataset = new ZCDatasets(args[0], args[1]);
 		displayMetrics(dataset, args[2]);
 		displayAppStageTime(dataset, args[2], workloadFileToDisplay); 
-		displayMemUASeries(dataset, args[2], mapReq, redReq);
+		if(outMemUA) displayMemUASeries(dataset, args[2], mapReq, redReq);
 		displayCDF(dataset, args[2], minDiffOfCDF, maxDiffOfCDF);
 	}
 }
